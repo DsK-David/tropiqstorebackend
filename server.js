@@ -2,12 +2,16 @@ const express = require('express');
 const cors = require('cors');
 const db = require('./database');
 const { v4: uuidv4 } = require('uuid');
+// const notificationRoutes = require('./routes/notifications');
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json());
+
+// Routes
+// app.use('/api', notificationRoutes);
 
 // Helper function to handle database errors
 const handleDatabaseError = (error, res) => {
@@ -192,6 +196,13 @@ app.post('/api/orders', async (req, res) => {
 
     await db('order_items').insert(orderItems);
 
+    // DECREMENTA O ESTOQUE DOS PRODUTOS
+    for (const item of items) {
+      await db('products')
+        .where('id', item.product.id)
+        .decrement('stock', item.quantity);
+    }
+
     // Obtém o pedido completo com relacionamentos
     const fullOrder = await db('orders')
       .leftJoin('customers', 'orders.customer_id', 'customers.id')
@@ -262,6 +273,16 @@ app.put('/api/orders/:id/status', async (req, res) => {
 
     // Usa o valor mapeado ou o valor original se não estiver no mapa
     const mappedStatus = statusMap[status] || status;
+
+    // Se o novo status for CANCELADO, repõe o estoque dos produtos do pedido
+    if (mappedStatus === 'CANCELLED') {
+      const orderItems = await db('order_items').where('order_id', id);
+      for (const item of orderItems) {
+        await db('products')
+          .where('id', item.product_id)
+          .increment('stock', item.quantity);
+      }
+    }
 
     await db('orders')
       .where('id', id)
